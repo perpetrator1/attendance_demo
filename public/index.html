@@ -1,0 +1,94 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Attendance Manager — Mark</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+  <div class="container my-4">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h2 class="card-title text-primary">Attendance Manager — Mark Attendance</h2>
+
+        <div class="row g-3 align-items-center mb-3">
+          <div class="col-auto">
+            <label class="form-label">Course</label>
+            <select id="course" class="form-select"></select>
+          </div>
+          <div class="col-auto">
+            <label class="form-label">Date</label>
+            <input type="date" id="date" class="form-control" />
+          </div>
+        </div>
+
+        <div id="studentsList" class="mb-3"></div>
+
+        <div>
+          <button id="submitBtn" class="btn btn-success">Submit Attendance</button>
+          <span id="msg" class="ms-3 text-success fw-semibold"></span>
+          <a href="report.html" class="btn btn-link float-end">View Reports</a>
+          <a href="student.html" class="btn btn-link float-end">Check Attendance</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+  document.getElementById('date').value = new Date().toISOString().slice(0,10);
+
+  async function loadCourses() {
+    const r = await fetch('/api/courses');
+    const courses = await r.json();
+    const sel = document.getElementById('course');
+    sel.innerHTML = '';
+    courses.forEach(c => {
+      const o = document.createElement('option');
+      o.value = c.code;
+      o.textContent = `${c.code} — ${c.name}`;
+      sel.appendChild(o);
+    });
+  }
+
+  async function loadStudents() {
+    const r = await fetch('/api/students');
+    const students = await r.json();
+    const div = document.getElementById('studentsList');
+    div.innerHTML = '';
+    if (students.length === 0) {
+      div.innerHTML = '<div class="alert alert-warning">No students found in the database.</div>';
+      return;
+    }
+    students.forEach(s => {
+      const row = document.createElement('div');
+      row.className = 'form-check mb-1';
+      row.innerHTML = `
+        <input class="form-check-input chk" type="checkbox" data-id="${s.id}" id="s${s.id}" checked>
+        <label class="form-check-label" for="s${s.id}">${s.name} <small class="text-muted">(${s.roll || ''})</small></label>
+      `;
+      div.appendChild(row);
+    });
+  }
+
+  document.getElementById('submitBtn').addEventListener('click', async () => {
+    const course = document.getElementById('course').value;
+    const session_date = document.getElementById('date').value;
+    const checks = Array.from(document.querySelectorAll('.chk'));
+    const records = checks.map(ch => ({ student_id: parseInt(ch.dataset.id), status: ch.checked ? 'Present' : 'Absent' }));
+    const res = await fetch('/api/attendance', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ course, session_date, records })
+    });
+    const j = await res.json();
+    document.getElementById('msg').textContent = j.ok ? 'Saved ✓' : 'Error saving';
+  });
+
+  (async function init(){
+    await loadCourses();
+    await loadStudents();
+  })();
+</script>
+</body>
+</html>
