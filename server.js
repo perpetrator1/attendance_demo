@@ -1,10 +1,71 @@
 // server.js (improved with subjects + per-course reports + Bootstrap-ready)
 const express = require('express');
+const session = require('express-session');
 const { Pool } = require('pg');
 const path = require('path');
 
 const app = express();
 app.use(express.json());
+
+// Session configuration
+app.use(session({
+  secret: 'attendance-secret-key-change-in-production',
+  resave: false,
+  saveUninitialized: false,
+  cookie: { 
+    secure: false, // set to true if using HTTPS
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+  }
+}));
+
+// Hardcoded users (in production, use database with hashed passwords)
+const users = [
+  { username: 'admin', password: 'admin123', role: 'admin' },
+  { username: 'teacher', password: 'teacher123', role: 'teacher' }
+];
+
+// Authentication middleware
+function requireAuth(req, res, next) {
+  if (req.session && req.session.user) {
+    next();
+  } else {
+    res.status(401).json({ error: 'Unauthorized' });
+  }
+}
+
+// Role-based middleware
+function requireRole(...roles) {
+  return (req, res, next) => {
+    if (!req.session || !req.session.user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    if (!roles.includes(req.session.user.role)) {
+      return res.status(403).json({ error: 'Forbidden - Insufficient permissions' });
+    }
+    next();
+  };
+}
+
+// Serve login page without authentication
+app.get('/login.html', express.static(path.join(__dirname, 'public')));
+
+// Protect all other static files
+app.use((req, res, next) => {
+  // Allow access to login page and API login endpoint
+  if (req.path === '/login.html' || req.path === '/api/login' || req.path === '/api/logout') {
+    next();
+  } else if (req.path.endsWith('.html') || req.path === '/') {
+    // Redirect to login if not authenticated
+    if (!req.session || !req.session.user) {
+      res.redirect('/login.html');
+    } else {
+      next();
+    }
+  } else {
+    next();
+  }
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // === PostgreSQL connection (update password if yours is different) ===
@@ -26,24 +87,59 @@ const courses = [
 ];
 
 
+// === Authentication APIs ===
+// Login
+app.post('/api/login', (req, res) => {
+  const { username, password } = req.body;
+  const user = users.find(u => u.username === username && u.password === password);
+  
+  if (user) {
+    req.session.user = { username: user.username, role: user.role };
+    res.json({ success: true, user: { username: user.username, role: user.role } });
+  } else {
+    res.status(401).json({ success: false, message: 'Invalid username or password' });
+  }
+});
+
+// Logout
+app.post('/api/logout', (req, res) => {
+  req.session.destroy((err) => {
+    if (err) {
+      res.status(500).json({ error: 'Could not log out' });
+    } else {
+      res.json({ success: true });
+    }
+  });
+});
+
+// Check authentication status
+app.get('/api/auth/status', (req, res) => {
+  if (req.session && req.session.user) {
+    res.json({ authenticated: true, user: req.session.user });
+  } else {
+    res.json({ authenticated: false });
+  }
+});
+
+// === Protected APIs (require authentication) ===
 // API: get courses
-app.get('/api/courses', (req, res) => {
+app.get('/api/courses', requireAuth, (req, res) => {
   res.json(courses);
 });
 
-// API: get students
-app.get('/api/students', async (req, res) => {
+// API: get students (teachers only)
+app.get('/api/students', requireRole('teacher'), async (req, res) => {
   try {
     const r = await pool.query('SELECT id, name, roll FROM students ORDER BY id;');
     res.json(r.rows);
   } catch (err) {
-    console.error(err);
+    console.error('Error fetching students:', err);
     res.status(500).json({ error: 'db error' });
   }
 });
 
-// API: save attendance
-app.post('/api/attendance', async (req, res) => {
+// API: save attendance (teachers only)
+app.post('/api/attendance', requireRole('teacher'), async (req, res) => {
   const { course, session_date, records } = req.body;
   if (!course || !session_date || !Array.isArray(records)) return res.status(400).json({ error: 'missing fields' });
 
@@ -69,8 +165,8 @@ app.post('/api/attendance', async (req, res) => {
   }
 });
 
-// API: overall report
-app.get('/api/report', async (req, res) => {
+// API: overall report (admins only)
+app.get('/api/report', requireRole('admin'), async (req, res) => {
   try {
     const sql = `
       SELECT s.id, s.name, s.roll,
@@ -85,13 +181,13 @@ app.get('/api/report', async (req, res) => {
     const r = await pool.query(sql);
     res.json(r.rows);
   } catch (err) {
-    console.error(err);
+    console.error('Error fetching report:', err);
     res.status(500).json({ error: 'db error' });
   }
 });
 
-// API: per-course report
-app.get('/api/report/course/:course', async (req, res) => {
+// API: per-course report (admins only)
+app.get('/api/report/course/:course', requireRole('admin'), async (req, res) => {
   const course = req.params.course;
   try {
     const sql = `
@@ -113,8 +209,8 @@ app.get('/api/report/course/:course', async (req, res) => {
     res.status(500).json({ error: 'db error' });
   }
 });
-// API: student-wise report (all subjects)
-app.get('/api/report/student/:roll', async (req, res) => {
+// API: student-wise report (all subjects) - accessible by all authenticated users
+app.get('/api/report/student/:roll', requireAuth, async (req, res) => {
   const roll = req.params.roll;
   try {
     const sql = `
@@ -144,8 +240,8 @@ app.get('/api/report/student/:roll', async (req, res) => {
     res.status(500).json({ error: 'db error' });
   }
 });
-// API: full matrix report (all students × all subjects)
-app.get('/api/report/all', async (req, res) => {
+// API: full matrix report (all students × all subjects) - admins only
+app.get('/api/report/all', requireRole('admin'), async (req, res) => {
   try {
     // list of subjects
     const subjects = [

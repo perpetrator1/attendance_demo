@@ -28,6 +28,7 @@
         <div>
           <button id="submitBtn" class="btn btn-success">Submit Attendance</button>
           <span id="msg" class="ms-3 text-success fw-semibold"></span>
+          <button id="logoutBtn" class="btn btn-outline-danger btn-sm float-end ms-2">Logout</button>
           <a href="report.html" class="btn btn-link float-end">View Reports</a>
           <a href="student.html" class="btn btn-link float-end">Check Attendance</a>
         </div>
@@ -36,39 +37,74 @@
   </div>
 
 <script>
+  // Check authentication and role on page load
+  async function checkAuth() {
+    try {
+      const res = await fetch('/api/auth/status');
+      const data = await res.json();
+      if (!data.authenticated) {
+        window.location.href = '/login.html';
+        return false;
+      }
+      // Only teachers can mark attendance
+      if (data.user.role !== 'teacher') {
+        alert('Only teachers can mark attendance. Redirecting to reports...');
+        window.location.href = '/report.html';
+        return false;
+      }
+      return true;
+    } catch (err) {
+      console.error('Auth check failed:', err);
+      window.location.href = '/login.html';
+      return false;
+    }
+  }
+
   document.getElementById('date').value = new Date().toISOString().slice(0,10);
 
   async function loadCourses() {
-    const r = await fetch('/api/courses');
-    const courses = await r.json();
-    const sel = document.getElementById('course');
-    sel.innerHTML = '';
-    courses.forEach(c => {
-      const o = document.createElement('option');
-      o.value = c.code;
-      o.textContent = `${c.code} — ${c.name}`;
-      sel.appendChild(o);
-    });
+    try {
+      const r = await fetch('/api/courses');
+      if (!r.ok) throw new Error('Failed to load courses');
+      const courses = await r.json();
+      const sel = document.getElementById('course');
+      sel.innerHTML = '';
+      courses.forEach(c => {
+        const o = document.createElement('option');
+        o.value = c.code;
+        o.textContent = `${c.code} — ${c.name}`;
+        sel.appendChild(o);
+      });
+    } catch (err) {
+      console.error('Error loading courses:', err);
+      alert('Error loading courses. Please refresh the page.');
+    }
   }
 
   async function loadStudents() {
-    const r = await fetch('/api/students');
-    const students = await r.json();
-    const div = document.getElementById('studentsList');
-    div.innerHTML = '';
-    if (students.length === 0) {
-      div.innerHTML = '<div class="alert alert-warning">No students found in the database.</div>';
-      return;
+    try {
+      const r = await fetch('/api/students');
+      if (!r.ok) throw new Error('Failed to load students');
+      const students = await r.json();
+      const div = document.getElementById('studentsList');
+      div.innerHTML = '';
+      if (students.length === 0) {
+        div.innerHTML = '<div class="alert alert-warning">No students found in the database.</div>';
+        return;
+      }
+      students.forEach(s => {
+        const row = document.createElement('div');
+        row.className = 'form-check mb-1';
+        row.innerHTML = `
+          <input class="form-check-input chk" type="checkbox" data-id="${s.id}" id="s${s.id}" checked>
+          <label class="form-check-label" for="s${s.id}">${s.name} <small class="text-muted">(${s.roll || ''})</small></label>
+        `;
+        div.appendChild(row);
+      });
+    } catch (err) {
+      console.error('Error loading students:', err);
+      alert('Error loading students. Please check if the database is running.');
     }
-    students.forEach(s => {
-      const row = document.createElement('div');
-      row.className = 'form-check mb-1';
-      row.innerHTML = `
-        <input class="form-check-input chk" type="checkbox" data-id="${s.id}" id="s${s.id}" checked>
-        <label class="form-check-label" for="s${s.id}">${s.name} <small class="text-muted">(${s.roll || ''})</small></label>
-      `;
-      div.appendChild(row);
-    });
   }
 
   document.getElementById('submitBtn').addEventListener('click', async () => {
@@ -76,18 +112,34 @@
     const session_date = document.getElementById('date').value;
     const checks = Array.from(document.querySelectorAll('.chk'));
     const records = checks.map(ch => ({ student_id: parseInt(ch.dataset.id), status: ch.checked ? 'Present' : 'Absent' }));
-    const res = await fetch('/api/attendance', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ course, session_date, records })
-    });
-    const j = await res.json();
-    document.getElementById('msg').textContent = j.ok ? 'Saved ✓' : 'Error saving';
+    
+    try {
+      const res = await fetch('/api/attendance', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ course, session_date, records })
+      });
+      const j = await res.json();
+      document.getElementById('msg').textContent = j.ok ? 'Saved ✓' : 'Error saving';
+    } catch (err) {
+      console.error('Error saving attendance:', err);
+      document.getElementById('msg').textContent = 'Error saving';
+    }
+  });
+
+  document.getElementById('logoutBtn').addEventListener('click', async () => {
+    const res = await fetch('/api/logout', { method: 'POST' });
+    if (res.ok) {
+      window.location.href = '/login.html';
+    }
   });
 
   (async function init(){
-    await loadCourses();
-    await loadStudents();
+    const isAuth = await checkAuth();
+    if (isAuth) {
+      await loadCourses();
+      await loadStudents();
+    }
   })();
 </script>
 </body>

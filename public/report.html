@@ -26,38 +26,84 @@
         </div>
 
         <a href="index.html" class="btn btn-link">Back to Marking</a>
+        <button id="logoutBtn" class="btn btn-outline-danger btn-sm float-end">Logout</button>
       </div>
     </div>
   </div>
 
 <script>
-async function loadFullReport() {
-  const res = await fetch('/api/report/all');
-  const data = await res.json();
-  const { subjects, students } = data;
-
-  // header row
-  const headerRow = document.getElementById('headerRow');
-  headerRow.innerHTML = '<th>Name</th><th>Roll</th>';
-  subjects.forEach(subj => {
-    headerRow.innerHTML += `<th>${subj.code}<br><small>${subj.name}</small></th>`;
-  });
-
-  // table body
-  const tbody = document.querySelector('#reportTable tbody');
-  tbody.innerHTML = '';
-  students.forEach(s => {
-    let tr = `<tr><td>${s.name}</td><td>${s.roll}</td>`;
-    subjects.forEach(subj => {
-      const subjData = s.subjects[subj.code];
-      tr += `<td>${subjData.perc}% (${subjData.present}/${subjData.total})</td>`;
-    });
-    tr += '</tr>';
-    tbody.innerHTML += tr;
-  });
+// Check authentication and role on page load
+async function checkAuth() {
+  try {
+    const res = await fetch('/api/auth/status');
+    const data = await res.json();
+    if (!data.authenticated) {
+      window.location.href = '/login.html';
+      return false;
+    }
+    // Only admins can view reports
+    if (data.user.role !== 'admin') {
+      alert('Only admins can view reports. Redirecting to attendance marking...');
+      window.location.href = '/index.html';
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error('Auth check failed:', err);
+    window.location.href = '/login.html';
+    return false;
+  }
 }
 
-loadFullReport();
+async function loadFullReport() {
+  try {
+    const res = await fetch('/api/report/all');
+    if (!res.ok) throw new Error('Failed to load report');
+    const data = await res.json();
+    const { subjects, students } = data;
+
+    // header row
+    const headerRow = document.getElementById('headerRow');
+    headerRow.innerHTML = '<th>Name</th><th>Roll</th>';
+    subjects.forEach(subj => {
+      headerRow.innerHTML += `<th>${subj.code}<br><small>${subj.name}</small></th>`;
+    });
+
+    // table body
+    const tbody = document.querySelector('#reportTable tbody');
+    tbody.innerHTML = '';
+    if (students.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="' + (subjects.length + 2) + '" class="text-center">No data available</td></tr>';
+      return;
+    }
+    students.forEach(s => {
+      let tr = `<tr><td>${s.name}</td><td>${s.roll}</td>`;
+      subjects.forEach(subj => {
+        const subjData = s.subjects[subj.code];
+        tr += `<td>${subjData.perc}% (${subjData.present}/${subjData.total})</td>`;
+      });
+      tr += '</tr>';
+      tbody.innerHTML += tr;
+    });
+  } catch (err) {
+    console.error('Error loading report:', err);
+    alert('Error loading report. Please check if the database is running.');
+  }
+}
+
+document.getElementById('logoutBtn').addEventListener('click', async () => {
+  const res = await fetch('/api/logout', { method: 'POST' });
+  if (res.ok) {
+    window.location.href = '/login.html';
+  }
+});
+
+(async function init(){
+  const isAuth = await checkAuth();
+  if (isAuth) {
+    await loadFullReport();
+  }
+})();
 </script>
 </body>
 </html>

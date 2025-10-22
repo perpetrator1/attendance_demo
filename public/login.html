@@ -71,12 +71,20 @@
       const data = await res.json();
       
       if (res.ok && data.success) {
-        window.location.href = 'index.html';
+        // Redirect based on user role
+        if (data.user.role === 'admin') {
+          window.location.href = 'report.html';
+        } else if (data.user.role === 'teacher') {
+          window.location.href = 'index.html';
+        } else {
+          window.location.href = 'index.html';
+        }
       } else {
         errorMsg.textContent = data.message || 'Invalid credentials';
         errorMsg.classList.remove('d-none');
       }
     } catch (err) {
+      console.error('Login error:', err);
       errorMsg.textContent = 'Login failed. Please try again.';
       errorMsg.classList.remove('d-none');
     }

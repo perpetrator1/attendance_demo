@@ -30,32 +30,67 @@
         </div>
 
         <a href="index.html" class="btn btn-link">Back to Marking</a>
+        <button id="logoutBtn" class="btn btn-outline-danger btn-sm float-end">Logout</button>
       </div>
     </div>
   </div>
 
 <script>
+// Check authentication on page load
+async function checkAuth() {
+  try {
+    const res = await fetch('/api/auth/status');
+    const data = await res.json();
+    if (!data.authenticated) {
+      window.location.href = '/login.html';
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error('Auth check failed:', err);
+    window.location.href = '/login.html';
+    return false;
+  }
+}
+
 async function loadStudentReport() {
   const roll = document.getElementById('roll').value.trim();
   if (!roll) {
     alert("Enter a roll or name!");
     return;
   }
-  const res = await fetch('/api/report/student/' + encodeURIComponent(roll));
-  const rows = await res.json();
-  const tbody = document.querySelector('#reportTable tbody');
-  tbody.innerHTML = '';
-  if (rows.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="4" class="text-danger">No records found</td></tr>';
-    return;
+  try {
+    const res = await fetch('/api/report/student/' + encodeURIComponent(roll));
+    if (!res.ok) throw new Error('Failed to load student report');
+    const rows = await res.json();
+    const tbody = document.querySelector('#reportTable tbody');
+    tbody.innerHTML = '';
+    if (rows.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="4" class="text-danger">No records found</td></tr>';
+      return;
+    }
+    rows.forEach(r => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${r.name}</td><td>${r.present || 0}</td><td>${r.total || 0}</td><td>${r.percentage || 0}%</td>`;
+      tbody.appendChild(tr);
+    });
+  } catch (err) {
+    console.error('Error loading student report:', err);
+    alert('Error loading report. Please try again.');
   }
-  rows.forEach(r => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${r.name}</td><td>${r.present || 0}</td><td>${r.total || 0}</td><td>${r.percentage || 0}%</td>`;
-    tbody.appendChild(tr);
-  });
 }
+
 document.getElementById('loadBtn').addEventListener('click', loadStudentReport);
+
+document.getElementById('logoutBtn').addEventListener('click', async () => {
+  const res = await fetch('/api/logout', { method: 'POST' });
+  if (res.ok) {
+    window.location.href = '/login.html';
+  }
+});
+
+// Initialize
+checkAuth();
 </script>
 </body>
 </html>
